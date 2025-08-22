@@ -145,6 +145,10 @@ function toBuffer(b) {
   if (b.buffer) return Buffer.from(b.buffer, b.byteOffset, b.length);
   return Buffer.from(b);
 }
+
+app.get("/", authenticateToken, async (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 app.post("/api/auth/login", authLimiter, async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -639,6 +643,45 @@ app.get("/api/audio/:id/section", authenticateToken, async (req, res) => {
           { label: "Topic 1", startTime: 240 },
           { label: "Topic 2", startTime: 1200 },
           { label: "Conclusion", startTime: 2100 },
+        ],
+      },
+      {
+        filename: "BY WAY OF ACCIDENT.mp3",
+        path: path.resolve("./assets/BY WAY OF ACCIDENT.mp3"),
+        permissions: ["admin"],
+        sections: [
+          { label: "Opening Credits", startTime: 0 },
+          { label: "Acknowledgements", startTime: 14 },
+          { label: "Foreword", startTime: 222 },
+          { label: "Introduction", startTime: 2726 },
+          { label: "Notes", startTime: 3554 },
+
+          // Chapters
+          { label: "Chapter 1", startTime: 3663 },
+          { label: "Chapter 2", startTime: 6148 },
+          { label: "Chapter 3", startTime: 9026 },
+          { label: "Chapter 4", startTime: 10987 },
+          { label: "Chapter 5", startTime: 13626 },
+          { label: "Chapter 6", startTime: 15516 },
+          { label: "Chapter 7", startTime: 18234 },
+          { label: "Chapter 8", startTime: 20920 },
+          { label: "Chapter 9", startTime: 24280 },
+          { label: "Chapter 10", startTime: 26298 },
+          { label: "Chapter 11", startTime: 28293 },
+          { label: "Chapter 12", startTime: 31875 },
+          { label: "Chapter 13", startTime: 34156 },
+          { label: "Chapter 14", startTime: 36520 },
+          { label: "Chapter 15", startTime: 38745 },
+          { label: "Chapter 16", startTime: 40818 },
+          { label: "Chapter 17", startTime: 43279 },
+          { label: "Chapter 18", startTime: 45397 },
+          { label: "Chapter 19", startTime: 47568 },
+          { label: "Chapter 20", startTime: 49737 },
+
+          // Closing Sections
+          { label: "Epilogue", startTime: 51820 },
+          { label: "Closing Credits", startTime: 52550 },
+          { label: "The End", startTime: 52567 },
         ],
       },
     ];
