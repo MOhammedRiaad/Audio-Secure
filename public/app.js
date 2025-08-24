@@ -10,6 +10,8 @@ class SecureAudioPlayer {
     this.isSessionActive = false;
     this.elements = {};
     this.init();
+    
+
   }
 
   init() {
@@ -18,6 +20,7 @@ class SecureAudioPlayer {
     this.setupEventListeners();
     this.restoreSession();
     this.showToast("Application initialized", "info");
+     this.initUserManagementModals();
   }
 
   initSecurity() {
@@ -1131,42 +1134,65 @@ class SecureAudioPlayer {
     }
   }
 
-  renderUsersManagement(users) {
-    if (!this.elements.usersContainer) return;
-    
+   renderUsersManagement(users) {
+    const container = document.getElementById('usersManagementContent');
+    if (!container) return;
+
     let html = `
-      <div class="users-list">
-        <div class="section-header">
-          <h3>👥 System Users</h3>
-          <button class="add-btn" data-action="show-create-user-form">➕ Add New User</button>
-        </div>
-        <div class="users-grid">
-    `;
-    
+      <div class="management-header">
+        <h3>System Users</h3>
+        <button class="btn btn-primary" data-action="show-create-user-form">
+          <span class="btn-icon">👤</span> Add New User
+        </button>
+      </div>
+      <div class="users-grid">`;
+
     users.forEach(user => {
+      const statusClass = user.accountStatus === 'active' ? 'status-active' : 'status-locked';
+      const statusIcon = user.accountStatus === 'active' ? '🟢' : '🔒';
+      const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never';
+      
       html += `
         <div class="user-card">
           <div class="user-info">
+            <div class="user-header">
+              <h4>${user.username}</h4>
+              <span class="user-status ${statusClass}">${statusIcon} ${user.accountStatus}</span>
+            </div>
             <div class="user-details">
-              <div class="user-name">${user.username}</div>
-              <div class="user-role ${user.role}">${user.role}</div>
-            </div>
-            <div class="user-meta">
-              <div class="meta-item">Created: ${new Date(user.createdAt).toLocaleDateString()}</div>
-              <div class="meta-item">Last Login: ${user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}</div>
+              <p><strong>Role:</strong> ${user.role}</p>
+              <p><strong>Created:</strong> ${new Date(user.createdAt).toLocaleDateString()}</p>
+              <p><strong>Last Login:</strong> ${lastLogin}</p>
+              ${user.createdBy ? `<p><strong>Created by:</strong> ${user.createdBy}</p>` : ''}
             </div>
           </div>
-          <div class="action-buttons">
-            <button class="action-btn edit" data-action="edit-user" data-user-id="${user._id}">Edit</button>
-            <button class="action-btn reset" data-action="reset-user-password" data-user-id="${user._id}">Reset Password</button>
-            <button class="action-btn delete" data-action="delete-user" data-user-id="${user._id}">Delete</button>
+          <div class="user-actions">
+            <button class="btn btn-sm btn-secondary" data-action="edit-user" data-user-id="${user._id}" title="Edit User">
+              ✏️ Edit
+            </button>
+            <button class="btn btn-sm btn-info" data-action="view-user-sessions" data-user-id="${user._id}" title="View Sessions">
+              📱 Sessions
+            </button>
+            <button class="btn btn-sm btn-warning" data-action="reset-user-password" data-user-id="${user._id}" title="Reset Password">
+              🔑 Reset
+            </button>
+            ${user.accountStatus === 'active' ? 
+              `<button class="btn btn-sm btn-danger" data-action="lock-user" data-user-id="${user._id}" title="Lock Account">
+                🔒 Lock
+              </button>` :
+              `<button class="btn btn-sm btn-success" data-action="unlock-user" data-user-id="${user._id}" title="Unlock Account">
+                🔓 Unlock
+              </button>`
+            }
+            <button class="btn btn-sm btn-danger" data-action="delete-user" data-user-id="${user._id}" title="Delete User">
+              🗑️ Delete
+            </button>
           </div>
-        </div>
-      `;
+        </div>`;
     });
-    
-    html += '</div></div>';
-    this.elements.usersContainer.innerHTML = html;
+
+    html += '</div>';
+    container.innerHTML = html;
   }
 
   async loadFilesManagement() {
@@ -1279,6 +1305,50 @@ class SecureAudioPlayer {
         }
       }
     );
+  }
+
+  async lockUserAccount(userId) {
+    try {
+      const response = await fetch(`${this.API_BASE}/api/admin/users/${userId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.authToken}`
+        },
+        body: JSON.stringify({ status: 'locked' })
+      });
+      
+      if (response.ok) {
+        this.showSuccess('User account locked successfully');
+        this.loadUsersManagement(); // Refresh the list
+      } else {
+        this.showError('Failed to lock user account');
+      }
+    } catch (error) {
+      this.showError('Network error while locking user');
+    }
+  }
+
+  async unlockUserAccount(userId) {
+    try {
+      const response = await fetch(`${this.API_BASE}/api/admin/users/${userId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.authToken}`
+        },
+        body: JSON.stringify({ status: 'active' })
+      });
+      
+      if (response.ok) {
+        this.showSuccess('User account unlocked successfully');
+        this.loadUsersManagement(); // Refresh the list
+      } else {
+        this.showError('Failed to unlock user account');
+      }
+    } catch (error) {
+      this.showError('Network error while unlocking user');
+    }
   }
 
   async deleteFile(fileId) {
@@ -1602,20 +1672,838 @@ class SecureAudioPlayer {
         const deleteFileId = target.dataset.fileId;
         this.deleteFile(deleteFileId);
         break;
+
+      case 'show-user-sessions-modal':
+        this.showUserSessionsModal();
+        break;
+        
+      case 'view-user-sessions':
+        const viewUserId = target.dataset.userId;
+        this.showUserSessionsModal(viewUserId);
+        break;
+        
+      case 'lock-user':
+        const lockUserId = target.dataset.userId;
+        this.lockUserAccount(lockUserId);
+        break;
+        
+      case 'unlock-user':
+        const unlockUserId = target.dataset.userId;
+        this.unlockUserAccount(unlockUserId);
+        break;
         
       default:
         console.warn('Unknown action:', action);
     }
   }
+    // ... existing code ...
+
+  // User Management Modal Functions
+  initUserManagementModals() {
+    this.setupCreateUserModal();
+    this.setupPasswordChangeModal();
+    this.setupDeviceAgreementModal();
+    this.setupUserSessionsModal();
+  }
+
+  setupCreateUserModal() {
+    const modal = document.getElementById('createUserModal');
+    const form = document.getElementById('createUserForm');
+    const submitBtn = document.getElementById('createUserSubmit');
+    const cancelBtn = document.getElementById('createUserCancel');
+    const passwordInput = document.getElementById('temporaryPassword');
+    const confirmPasswordInput = document.getElementById('confirmPassword');
+
+    if (!modal || !form) return;
+
+    // Password strength validation
+    passwordInput?.addEventListener('input', (e) => {
+      this.validatePasswordStrength(e.target.value, 'passwordStrength');
+      this.validatePasswordRequirements(e.target.value, '');
+    });
+
+    // Confirm password validation
+    confirmPasswordInput?.addEventListener('input', (e) => {
+      this.validatePasswordMatch(passwordInput.value, e.target.value, 'confirmPasswordError');
+    });
+
+    // Form submission
+    submitBtn?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await this.handleCreateUser(form);
+    });
+
+    // Cancel button
+    cancelBtn?.addEventListener('click', () => {
+      this.hideCreateUserModal();
+    });
+
+    // Close on backdrop click
+    modal.querySelector('.modal-backdrop')?.addEventListener('click', () => {
+      this.hideCreateUserModal();
+    });
+  }
+
+  setupPasswordChangeModal() {
+    const modal = document.getElementById('passwordChangeModal');
+    const form = document.getElementById('passwordChangeForm');
+    const submitBtn = document.getElementById('passwordChangeSubmit');
+    const newPasswordInput = document.getElementById('newPassword');
+    const confirmNewPasswordInput = document.getElementById('confirmNewPassword');
+
+    if (!modal || !form) return;
+
+    // New password strength validation
+    newPasswordInput?.addEventListener('input', (e) => {
+      this.validatePasswordStrength(e.target.value, 'newPasswordStrength');
+      this.validatePasswordRequirements(e.target.value, 'new');
+    });
+
+    // Confirm new password validation
+    confirmNewPasswordInput?.addEventListener('input', (e) => {
+      this.validatePasswordMatch(newPasswordInput.value, e.target.value, 'confirmNewPasswordError');
+    });
+
+    // Form submission
+    submitBtn?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await this.handlePasswordChange(form);
+    });
+  }
+
+  setupDeviceAgreementModal() {
+    const modal = document.getElementById('deviceAgreementModal');
+    const checkbox = document.getElementById('agreeToPolicy');
+    const acceptBtn = document.getElementById('deviceAgreementAccept');
+    const declineBtn = document.getElementById('deviceAgreementDecline');
+
+    if (!modal) return;
+
+    // Enable/disable accept button based on checkbox
+    checkbox?.addEventListener('change', (e) => {
+      if (acceptBtn) {
+        acceptBtn.disabled = !e.target.checked;
+      }
+    });
+
+    // Accept button
+    acceptBtn?.addEventListener('click', async () => {
+      await this.handleDeviceAgreementAccept();
+    });
+
+    // Decline button
+    declineBtn?.addEventListener('click', async () => {
+      await this.handleDeviceAgreementDecline();
+    });
+  }
+
+  setupUserSessionsModal() {
+    const modal = document.getElementById('userSessionsModal');
+    const userSelect = document.getElementById('userSelect');
+    const closeBtn = document.getElementById('userSessionsClose');
+    const lockAllBtn = document.getElementById('lockAllSessions');
+    const unlockAllBtn = document.getElementById('unlockAllSessions');
+
+    if (!modal) return;
+
+    // User selection change
+    userSelect?.addEventListener('change', async (e) => {
+      if (e.target.value) {
+        await this.loadUserSessions(e.target.value);
+      } else {
+        document.getElementById('userSessionsContent').style.display = 'none';
+      }
+    });
+
+    // Close button
+    closeBtn?.addEventListener('click', () => {
+      this.hideUserSessionsModal();
+    });
+
+    // Lock all sessions
+    lockAllBtn?.addEventListener('click', async () => {
+      const userId = userSelect?.value;
+      if (userId) {
+        await this.lockAllUserSessions(userId);
+      }
+    });
+
+    // Unlock all sessions
+    unlockAllBtn?.addEventListener('click', async () => {
+      const userId = userSelect?.value;
+      if (userId) {
+        await this.unlockAllUserSessions(userId);
+      }
+    });
+
+    // Close on backdrop click
+    modal.querySelector('.modal-backdrop')?.addEventListener('click', () => {
+      this.hideUserSessionsModal();
+    });
+  }
+
+  // Password validation functions
+  validatePasswordStrength(password, strengthElementId) {
+    const strengthElement = document.getElementById(strengthElementId);
+    if (!strengthElement) return;
+
+    const strength = this.calculatePasswordStrength(password);
+    const strengthBar = strengthElement.querySelector('.password-strength-bar');
+    
+    strengthElement.className = `password-strength ${strength.level}`;
+    if (strengthBar) {
+      strengthBar.style.width = `${strength.percentage}%`;
+    }
+  }
+
+  calculatePasswordStrength(password) {
+    let score = 0;
+    if (password.length >= 8) score += 25;
+    if (/[a-z]/.test(password)) score += 25;
+    if (/[A-Z]/.test(password)) score += 25;
+    if (/[0-9]/.test(password)) score += 15;
+    if (/[^A-Za-z0-9]/.test(password)) score += 10;
+
+    let level = 'weak';
+    if (score >= 85) level = 'strong';
+    else if (score >= 70) level = 'good';
+    else if (score >= 50) level = 'fair';
+
+    return { level, percentage: Math.min(score, 100) };
+  }
+
+  validatePasswordRequirements(password, prefix = '') {
+    const requirements = [
+      { id: `${prefix}lengthReq`, test: password.length >= 8 },
+      { id: `${prefix}upperReq`, test: /[A-Z]/.test(password) },
+      { id: `${prefix}lowerReq`, test: /[a-z]/.test(password) },
+      { id: `${prefix}numberReq`, test: /[0-9]/.test(password) },
+      { id: `${prefix}specialReq`, test: /[^A-Za-z0-9]/.test(password) }
+    ];
+
+    requirements.forEach(req => {
+      const element = document.getElementById(req.id);
+      if (element) {
+        element.className = req.test ? 'valid' : 'invalid';
+      }
+    });
+  }
+
+  validatePasswordMatch(password, confirmPassword, errorElementId) {
+    const errorElement = document.getElementById(errorElementId);
+    if (!errorElement) return;
+
+    if (confirmPassword && password !== confirmPassword) {
+      errorElement.textContent = 'Passwords do not match';
+      errorElement.style.display = 'block';
+      return false;
+    } else {
+      errorElement.style.display = 'none';
+      return true;
+    }
+  }
+
+  // Modal display functions
+  showCreateUserModal() {
+    const modal = document.getElementById('createUserModal');
+    if (modal) {
+      modal.style.display = 'flex';
+      this.clearCreateUserForm();
+    }
+  }
+
+  hideCreateUserModal() {
+    const modal = document.getElementById('createUserModal');
+    if (modal) {
+      modal.style.display = 'none';
+      this.clearCreateUserForm();
+    }
+  }
+
+  showPasswordChangeModal() {
+    const modal = document.getElementById('passwordChangeModal');
+    if (modal) {
+      modal.style.display = 'flex';
+      this.clearPasswordChangeForm();
+    }
+  }
+
+  hidePasswordChangeModal() {
+    const modal = document.getElementById('passwordChangeModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  }
+
+  showDeviceAgreementModal(deviceInfo) {
+    const modal = document.getElementById('deviceAgreementModal');
+    if (modal) {
+      this.populateDeviceInfo(deviceInfo);
+      modal.style.display = 'flex';
+    }
+  }
+
+  hideDeviceAgreementModal() {
+    const modal = document.getElementById('deviceAgreementModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  }
+
+  showUserSessionsModal(userId = null) {
+    const modal = document.getElementById('userSessionsModal');
+    if (modal) {
+      modal.style.display = 'flex';
+      // Load users first, then select specific user if provided
+      this.loadUsersForSessionManagement().then(() => {
+        if (userId) {
+          const userSelect = document.getElementById('userSelect');
+          if (userSelect) {
+            userSelect.value = userId;
+            // Trigger change event to load sessions
+            userSelect.dispatchEvent(new Event('change'));
+          }
+        }
+      });
+    }
+  }
+
+  hideUserSessionsModal() {
+    const modal = document.getElementById('userSessionsModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  }
+
+  // Form handling functions
+  async handleCreateUser(form) {
+    const formData = new FormData(form);
+    const userData = {
+      username: formData.get('username'),
+      password: formData.get('password'),
+      confirmPassword: formData.get('confirmPassword'),
+      role: formData.get('role')
+    };
+
+    // Validate form
+    if (!this.validateCreateUserForm(userData)) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          username: userData.username,
+          password: userData.password,
+          role: userData.role
+        })
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        this.showSuccess(`User '${userData.username}' created successfully`);
+        this.hideCreateUserModal();
+        // Refresh users list if on admin panel
+        if (this.currentAdminTab === 'users') {
+          await this.loadUsersManagement();
+        }
+      } else {
+        this.showError(result.error || 'Failed to create user');
+      }
+    } catch (error) {
+      this.showError('Network error occurred while creating user');
+    }
+  }
+
+  async handlePasswordChange(form) {
+    const formData = new FormData(form);
+    const passwordData = {
+      currentPassword: formData.get('currentPassword'),
+      newPassword: formData.get('newPassword'),
+      confirmNewPassword: formData.get('confirmNewPassword')
+    };
+
+    // Validate form
+    if (!this.validatePasswordChangeForm(passwordData)) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          currentPassword: passwordData.currentPassword,
+          newPassword: passwordData.newPassword
+        })
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        this.showSuccess('Password changed successfully');
+        this.hidePasswordChangeModal();
+        // Update user session to reflect password change
+        await this.updateSessionInfo();
+      } else {
+        this.showError(result.error || 'Failed to change password');
+      }
+    } catch (error) {
+      this.showError('Network error occurred while changing password');
+    }
+  }
+
+  async handleDeviceAgreementAccept() {
+    try {
+      const deviceFingerprint = this.generateDeviceFingerprint();
+      
+      const response = await fetch('/api/auth/device-agreement', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          deviceFingerprint,
+          agreed: true
+        })
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        this.hideDeviceAgreementModal();
+        this.showSuccess('Device policy accepted. You can now continue.');
+      } else {
+        this.showError(result.error || 'Failed to accept device policy');
+      }
+    } catch (error) {
+      this.showError('Network error occurred');
+    }
+  }
+
+  async handleDeviceAgreementDecline() {
+    this.hideDeviceAgreementModal();
+    this.showError('Device policy declined. You will be logged out.');
+    setTimeout(() => {
+      this.handleLogout();
+    }, 2000);
+  }
+
+  // Device fingerprinting
+  generateDeviceFingerprint() {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.textBaseline = 'top';
+    ctx.font = '14px Arial';
+    ctx.fillText('Device fingerprint', 2, 2);
+    
+    const fingerprint = {
+      userAgent: navigator.userAgent,
+      language: navigator.language,
+      platform: navigator.platform,
+      screenResolution: `${screen.width}x${screen.height}`,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      canvas: canvas.toDataURL(),
+      cookieEnabled: navigator.cookieEnabled,
+      doNotTrack: navigator.doNotTrack
+    };
+
+    return btoa(JSON.stringify(fingerprint));
+  }
+
+  populateDeviceInfo(deviceInfo) {
+    const elements = {
+      deviceBrowser: document.getElementById('deviceBrowser'),
+      deviceOS: document.getElementById('deviceOS'),
+      deviceIP: document.getElementById('deviceIP'),
+      loginTime: document.getElementById('loginTime')
+    };
+
+    if (elements.deviceBrowser) {
+      elements.deviceBrowser.textContent = this.getBrowserInfo();
+    }
+    if (elements.deviceOS) {
+      elements.deviceOS.textContent = this.getOSInfo();
+    }
+    if (elements.deviceIP && deviceInfo?.ip) {
+      elements.deviceIP.textContent = deviceInfo.ip;
+    }
+    if (elements.loginTime) {
+      elements.loginTime.textContent = new Date().toLocaleString();
+    }
+  }
+
+  getBrowserInfo() {
+    const ua = navigator.userAgent;
+    if (ua.includes('Chrome')) return 'Google Chrome';
+    if (ua.includes('Firefox')) return 'Mozilla Firefox';
+    if (ua.includes('Safari')) return 'Safari';
+    if (ua.includes('Edge')) return 'Microsoft Edge';
+    return 'Unknown Browser';
+  }
+
+  getOSInfo() {
+    const platform = navigator.platform;
+    if (platform.includes('Win')) return 'Windows';
+    if (platform.includes('Mac')) return 'macOS';
+    if (platform.includes('Linux')) return 'Linux';
+    if (platform.includes('iPhone') || platform.includes('iPad')) return 'iOS';
+    if (platform.includes('Android')) return 'Android';
+    return 'Unknown OS';
+  }
+
+  // Session management functions
+  async loadUsersForSessionManagement() {
+    try {
+      const response = await fetch('/api/admin/users', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+
+      if (response.ok) {
+        const users = await response.json();
+        this.populateUserSelect(users);
+        return users;
+      } else {
+        this.showError('Failed to load users for session management');
+        return [];
+      }
+    } catch (error) {
+      this.showError('Network error while loading users');
+      return [];
+    }
+  }
+
+  populateUserSelect(users) {
+    const userSelect = document.getElementById('userSelect');
+    if (!userSelect) return;
+
+    userSelect.innerHTML = '<option value="">🔍 Select a user to view sessions...</option>';
+    users.forEach(user => {
+      const option = document.createElement('option');
+      option.value = user._id;
+      const statusIcon = user.accountStatus === 'active' ? '🟢' : '🔴';
+      option.textContent = `${statusIcon} ${user.username} (${user.role})`;
+      userSelect.appendChild(option);
+    });
+  }
+
+  async loadUserSessions(userId) {
+    try {
+      const response = await fetch(`/api/admin/users/${userId}/sessions`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+
+      if (response.ok) {
+        const sessions = await response.json();
+        this.renderUserSessions(sessions, userId);
+      } else {
+        this.showError('Failed to load user sessions');
+      }
+    } catch (error) {
+      this.showError('Network error occurred');
+    }
+  }
+
+  renderUserSessions(sessions, userId) {
+    const contentDiv = document.getElementById('userSessionsContent');
+    const tableBody = document.getElementById('sessionsTableBody');
+    const userNameSpan = document.getElementById('selectedUserName');
+    const sessionCount = document.getElementById('sessionCount');
+
+    if (!contentDiv || !tableBody) return;
+
+    // Show content and set user name
+    contentDiv.style.display = 'block';
+    if (userNameSpan) {
+      const userSelect = document.getElementById('userSelect');
+      const selectedOption = userSelect?.selectedOptions[0];
+      userNameSpan.textContent = selectedOption?.textContent || 'Unknown User';
+    }
+
+    // Update session count
+    if (sessionCount) {
+      sessionCount.textContent = `${sessions.length} session(s)`;
+    }
+
+    // Clear existing rows
+    tableBody.innerHTML = '';
+
+    if (sessions.length === 0) {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td colspan="6" class="no-sessions">
+          <div class="empty-state">
+            <span class="empty-icon">📱</span>
+            <p>No active sessions found</p>
+            <small>This user has no current login sessions</small>
+          </div>
+        </td>`;
+      tableBody.appendChild(row);
+      return;
+    }
+
+    // Render session rows with improved styling
+    sessions.forEach((session, index) => {
+      const row = document.createElement('tr');
+      const statusClass = session.status === 'active' ? 'status-active' : 'status-locked';
+      const statusIcon = session.status === 'active' ? '🟢' : '🔒';
+      
+      row.innerHTML = `
+        <td class="device-info">
+          <div class="device-details">
+            <span class="device-name">${this.formatDeviceInfo(session.deviceInfo)}</span>
+            <small class="device-ip">IP: ${session.ipAddress || 'Unknown'}</small>
+          </div>
+        </td>
+        <td class="time-info">
+          <div class="time-details">
+            <span class="login-time">${new Date(session.loginTime).toLocaleString()}</span>
+            <small class="last-activity">Last: ${new Date(session.lastActivity).toLocaleString()}</small>
+          </div>
+        </td>
+        <td class="status-cell">
+          <span class="session-status ${statusClass}">
+            ${statusIcon} ${session.status}
+          </span>
+        </td>
+        <td class="actions-cell">
+          <div class="session-actions">
+            ${session.status === 'active' ? 
+              `<button class="btn btn-sm btn-warning" onclick="audioPlayer.lockUserSession('${userId}', '${session._id}')" title="Lock Session">
+                🔒 Lock
+              </button>` :
+              `<button class="btn btn-sm btn-success" onclick="audioPlayer.unlockUserSession('${userId}', '${session._id}')" title="Unlock Session">
+                🔓 Unlock
+              </button>`
+            }
+            <button class="btn btn-sm btn-danger" onclick="audioPlayer.terminateUserSession('${userId}', '${session._id}')" title="Terminate Session">
+              ❌ End
+            </button>
+          </div>
+        </td>
+      `;
+      tableBody.appendChild(row);
+    });
+  }
+
+  formatDeviceInfo(deviceInfo) {
+    if (!deviceInfo) return 'Unknown Device';
+    try {
+      const info = typeof deviceInfo === 'string' ? JSON.parse(deviceInfo) : deviceInfo;
+      return `${info.browser || 'Unknown'} on ${info.os || 'Unknown'}`;
+    } catch {
+      return 'Unknown Device';
+    }
+  }
+
+  async lockUserSession(userId, sessionId) {
+    await this.updateSessionStatus(userId, sessionId, 'locked');
+  }
+
+  async unlockUserSession(userId, sessionId) {
+    await this.updateSessionStatus(userId, sessionId, 'active');
+  }
+
+  async terminateUserSession(userId, sessionId) {
+    await this.updateSessionStatus(userId, sessionId, 'terminated');
+  }
+
+  async updateSessionStatus(userId, sessionId, status) {
+    try {
+      const response = await fetch(`/api/admin/users/${userId}/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ status })
+      });
+
+      if (response.ok) {
+        this.showSuccess(`Session ${status} successfully`);
+        await this.loadUserSessions(userId);
+      } else {
+        const result = await response.json();
+        this.showError(result.error || `Failed to ${status} session`);
+      }
+    } catch (error) {
+      this.showError('Network error occurred');
+    }
+  }
+
+  async lockAllUserSessions(userId) {
+    await this.bulkUpdateUserSessions(userId, 'locked');
+  }
+
+  async unlockAllUserSessions(userId) {
+    await this.bulkUpdateUserSessions(userId, 'active');
+  }
+
+  async bulkUpdateUserSessions(userId, status) {
+    try {
+      const response = await fetch(`/api/admin/users/${userId}/sessions/bulk`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ status })
+      });
+
+      if (response.ok) {
+        this.showSuccess(`All sessions ${status} successfully`);
+        await this.loadUserSessions(userId);
+      } else {
+        const result = await response.json();
+        this.showError(result.error || `Failed to ${status} sessions`);
+      }
+    } catch (error) {
+      this.showError('Network error occurred');
+    }
+  }
+
+  // Form validation functions
+  validateCreateUserForm(userData) {
+    let isValid = true;
+
+    // Clear previous errors
+    this.clearFormErrors(['usernameError', 'passwordError', 'confirmPasswordError', 'roleError']);
+
+    // Username validation
+    if (!userData.username || userData.username.length < 3) {
+      this.showFormError('usernameError', 'Username must be at least 3 characters long');
+      isValid = false;
+    }
+
+    // Password validation
+    if (!userData.password || userData.password.length < 8) {
+      this.showFormError('passwordError', 'Password must be at least 8 characters long');
+      isValid = false;
+    }
+
+    // Password confirmation
+    if (userData.password !== userData.confirmPassword) {
+      this.showFormError('confirmPasswordError', 'Passwords do not match');
+      isValid = false;
+    }
+
+    // Role validation
+    if (!userData.role || !['user', 'admin'].includes(userData.role)) {
+      this.showFormError('roleError', 'Please select a valid role');
+      isValid = false;
+    }
+
+    return isValid;
+  }
+
+  validatePasswordChangeForm(passwordData) {
+    let isValid = true;
+
+    // Clear previous errors
+    this.clearFormErrors(['currentPasswordError', 'newPasswordError', 'confirmNewPasswordError']);
+
+    // Current password validation
+    if (!passwordData.currentPassword) {
+      this.showFormError('currentPasswordError', 'Current password is required');
+      isValid = false;
+    }
+
+    // New password validation
+    if (!passwordData.newPassword || passwordData.newPassword.length < 8) {
+      this.showFormError('newPasswordError', 'New password must be at least 8 characters long');
+      isValid = false;
+    }
+
+    // New password confirmation
+    if (passwordData.newPassword !== passwordData.confirmNewPassword) {
+      this.showFormError('confirmNewPasswordError', 'Passwords do not match');
+      isValid = false;
+    }
+
+    // Check if new password is different from current
+    if (passwordData.currentPassword === passwordData.newPassword) {
+      this.showFormError('newPasswordError', 'New password must be different from current password');
+      isValid = false;
+    }
+
+    return isValid;
+  }
+
+  showFormError(elementId, message) {
+    const errorElement = document.getElementById(elementId);
+    if (errorElement) {
+      errorElement.textContent = message;
+      errorElement.style.display = 'block';
+    }
+  }
+
+  clearFormErrors(errorIds) {
+    errorIds.forEach(id => {
+      const errorElement = document.getElementById(id);
+      if (errorElement) {
+        errorElement.style.display = 'none';
+        errorElement.textContent = '';
+      }
+    });
+  }
+
+  clearCreateUserForm() {
+    const form = document.getElementById('createUserForm');
+    if (form) {
+      form.reset();
+      this.clearFormErrors(['usernameError', 'passwordError', 'confirmPasswordError', 'roleError']);
+      
+      // Reset password strength indicator
+      const strengthElement = document.getElementById('passwordStrength');
+      if (strengthElement) {
+        strengthElement.className = 'password-strength';
+        const strengthBar = strengthElement.querySelector('.password-strength-bar');
+        if (strengthBar) strengthBar.style.width = '0%';
+      }
+    }
+  }
+
+  clearPasswordChangeForm() {
+    const form = document.getElementById('passwordChangeForm');
+    if (form) {
+      form.reset();
+      this.clearFormErrors(['currentPasswordError', 'newPasswordError', 'confirmNewPasswordError']);
+      
+      // Reset password strength indicator
+      const strengthElement = document.getElementById('newPasswordStrength');
+      if (strengthElement) {
+        strengthElement.className = 'password-strength';
+        const strengthBar = strengthElement.querySelector('.password-strength-bar');
+        if (strengthBar) strengthBar.style.width = '0%';
+      }
+    }
+  }
+
+  // Override the existing showCreateUserForm method
+  showCreateUserForm() {
+    this.showCreateUserModal();
+  }
+
 
   // Placeholder methods for additional admin functionality
   editUserPermissions(userId) {
     this.showToast('Edit permissions feature coming soon', 'info');
   }
 
-  showCreateUserForm() {
-    this.showToast('Create user feature coming soon', 'info');
-  }
 
   editUser(userId) {
     this.showToast('Edit user feature coming soon', 'info');

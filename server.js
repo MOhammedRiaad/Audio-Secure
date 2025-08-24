@@ -78,6 +78,16 @@ const UserSchema = new mongoose.Schema(
     username: { type: String, unique: true },
     passwordHash: String,
     roles: [String],
+    // New fields for user management
+    isTemporaryPassword: { type: Boolean, default: false },
+    mustChangePassword: { type: Boolean, default: false },
+    accountStatus: { type: String, enum: ['active', 'locked', 'suspended'], default: 'active' },
+    lastLogin: { type: Date },
+    failedLoginAttempts: { type: Number, default: 0 },
+    lockoutUntil: { type: Date },
+    deviceAgreementAccepted: { type: Boolean, default: false },
+    allowedDeviceFingerprint: { type: String },
+    createdBy: { type: String }, // admin who created this user
   },
   { timestamps: true }
 );
@@ -153,6 +163,41 @@ const AuditLogSchema = new mongoose.Schema(
 AuditLogSchema.index({ timestamp: -1 }); // for efficient querying by date
 const AuditLog = mongoose.model("AuditLog", AuditLogSchema);
 
+const UserSessionSchema = new mongoose.Schema(
+  {
+    userId: { type: String, required: true, index: true },
+    deviceFingerprint: { type: String, required: true },
+    deviceInfo: {
+      browser: String,
+      os: String,
+      screen: String,
+      timezone: String,
+      language: String,
+      userAgent: String
+    },
+    ipAddress: { type: String, required: true },
+    loginTime: { type: Date, default: Date.now },
+    lastActivity: { type: Date, default: Date.now },
+    isActive: { type: Boolean, default: true },
+    sessionToken: { type: String, unique: true },
+    status: { type: String, enum: ['active', 'locked', 'terminated'], default: 'active' }
+  },
+  { timestamps: true }
+);
+UserSessionSchema.index({ userId: 1, deviceFingerprint: 1 });
+const UserSession = mongoose.model("UserSession", UserSessionSchema);
+
+const PasswordChangeLogSchema = new mongoose.Schema(
+  {
+    userId: { type: String, required: true, index: true },
+    changedBy: { type: String, required: true }, // 'self' or admin username
+    reason: { type: String, enum: ['forced', 'voluntary', 'reset'], required: true },
+    timestamp: { type: Date, default: Date.now }
+  },
+  { timestamps: true }
+);
+const PasswordChangeLog = mongoose.model("PasswordChangeLog", PasswordChangeLogSchema);
+
 // ----------------------------
 // Permission checking utilities
 // ----------------------------
@@ -193,11 +238,53 @@ function signJWT(payload, expiresIn = "30m") {
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
-  if (!token) return res.status(401).json({ error: "token required" });
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
-    if (err) return res.status(403).json({ error: "invalid/expired token" });
-    req.user = { userId: decoded.userId };
-    next();
+  if (!token) return res.status(401).json({ error: "no token" });
+  
+  jwt.verify(token, JWT_SECRET, async (err, decoded) => {
+    if (err) return res.status(403).json({ error: "invalid token" });
+    
+    try {
+      // Check if user still exists and account is active
+      const user = await User.findOne({ username: decoded.userId });
+      if (!user) {
+        return res.status(401).json({ error: "user not found" });
+      }
+      
+      if (user.accountStatus !== 'active') {
+        return res.status(403).json({ 
+          error: "Account is not active",
+          accountStatus: user.accountStatus
+        });
+      }
+      
+      // For non-admin users, validate device session
+      if (!user.roles.includes('admin') && decoded.deviceFingerprint) {
+        const session = await UserSession.findOne({
+          userId: decoded.userId,
+          deviceFingerprint: decoded.deviceFingerprint,
+          status: 'active'
+        });
+        
+        if (!session) {
+          return res.status(403).json({ 
+            error: "Invalid or terminated session",
+            sessionTerminated: true
+          });
+        }
+        
+        // Update last activity
+        await UserSession.findByIdAndUpdate(session._id, {
+          lastActivity: new Date()
+        });
+      }
+      
+      // Fix: Use userId instead of username to match endpoint expectations
+      req.user = { userId: decoded.userId, roles: user.roles };
+      next();
+    } catch (error) {
+      console.error("Auth middleware error:", error);
+      return res.status(500).json({ error: "authentication error" });
+    }
   });
 }
 // --- Helper to convert BSON Binary to Node Buffer ---
@@ -213,22 +300,146 @@ app.get("/", authenticateToken, async (req, res) => {
 });
 app.post("/api/auth/login", authLimiter, async (req, res) => {
   try {
-    const { username, password } = req.body || {};
-    if (!username || !password)
+    const { username, password, deviceFingerprint, deviceInfo } = req.body || {};
+    
+    if (!username || !password) {
       return res.status(400).json({ error: "username & password required" });
-    const u = await User.findOne({ username });
-    if (!u) return res.status(401).json({ error: "invalid credentials" });
-    const ok = await bcrypt.compare(password, u.passwordHash);
-    if (!ok) return res.status(401).json({ error: "invalid credentials" });
-    const token = signJWT({ userId: u.username }, "30m");
+    }
+
+    // Find user
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(401).json({ error: "invalid credentials" });
+    }
+
+    // Check account status
+    if (user.accountStatus === 'locked') {
+      return res.status(403).json({ 
+        error: "Account is locked. Contact administrator.",
+        accountLocked: true
+      });
+    }
+
+    if (user.accountStatus === 'suspended') {
+      return res.status(403).json({ 
+        error: "Account is suspended. Contact administrator.",
+        accountSuspended: true
+      });
+    }
+
+    // Check for account lockout due to failed attempts
+    if (user.lockoutUntil && user.lockoutUntil > new Date()) {
+      return res.status(423).json({ 
+        error: "Account temporarily locked due to failed login attempts. Try again later.",
+        lockoutUntil: user.lockoutUntil
+      });
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+    if (!isValidPassword) {
+      // Increment failed login attempts
+      const failedAttempts = (user.failedLoginAttempts || 0) + 1;
+      const updateData = { failedLoginAttempts: failedAttempts };
+      
+      // Lock account after 5 failed attempts for 15 minutes
+      if (failedAttempts >= 5) {
+        updateData.lockoutUntil = new Date(Date.now() + 15 * 60 * 1000);
+      }
+      
+      await User.findByIdAndUpdate(user._id, updateData);
+      return res.status(401).json({ error: "invalid credentials" });
+    }
+
+    // Reset failed login attempts on successful password verification
+    await User.findByIdAndUpdate(user._id, {
+      failedLoginAttempts: 0,
+      lockoutUntil: null,
+      lastLogin: new Date()
+    });
+
+    // Check if password change is required
+    if (user.mustChangePassword || user.isTemporaryPassword) {
+      return res.status(200).json({
+        success: false,
+        requirePasswordChange: true,
+        isTemporaryPassword: user.isTemporaryPassword,
+        message: user.isTemporaryPassword 
+          ? "You must change your temporary password before accessing the system."
+          : "Password change required.",
+        user: { username: user.username, roles: user.roles }
+      });
+    }
+
+    // Device validation for non-admin users
+    if (!user.roles.includes('admin') && deviceFingerprint && deviceInfo) {
+      // Check if device agreement is required
+      if (!user.deviceAgreementAccepted) {
+        return res.status(200).json({
+          success: false,
+          requireDeviceAgreement: true,
+          deviceInfo: deviceInfo,
+          message: "Please confirm single-device access policy.",
+          user: { username: user.username, roles: user.roles }
+        });
+      }
+
+      // Check if this is a different device
+      if (user.allowedDeviceFingerprint && user.allowedDeviceFingerprint !== deviceFingerprint) {
+        // Lock account due to different device access
+        await User.findByIdAndUpdate(user._id, {
+          accountStatus: 'locked'
+        });
+        
+        // Terminate all existing sessions
+        await UserSession.updateMany(
+          { userId: user.username, status: 'active' },
+          { status: 'terminated' }
+        );
+
+        return res.status(403).json({
+          error: "Account locked due to access from unauthorized device. Contact administrator.",
+          deviceViolation: true,
+          accountLocked: true
+        });
+      }
+
+      // Create or update user session
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      await UserSession.findOneAndUpdate(
+        { userId: user.username, deviceFingerprint },
+        {
+          deviceInfo,
+          ipAddress: req.ip || req.connection.remoteAddress,
+          loginTime: new Date(),
+          lastActivity: new Date(),
+          isActive: true,
+          sessionToken,
+          status: 'active'
+        },
+        { upsert: true }
+      );
+    }
+
+    // Generate JWT token
+    const token = signJWT({ 
+      userId: user.username,
+      deviceFingerprint: deviceFingerprint || null
+    }, "30m");
+
     res.json({
       success: true,
       token,
-      user: { username: u.username, roles: u.roles },
+      user: { 
+        username: user.username, 
+        roles: user.roles,
+        accountStatus: user.accountStatus,
+        deviceAgreementAccepted: user.deviceAgreementAccepted
+      },
       expiresIn: 1800,
     });
-  } catch (e) {
-    console.error(e);
+  } catch (error) {
+    console.error("Login error:", error);
     res.status(500).json({ error: "server error" });
   }
 });
@@ -265,6 +476,32 @@ app.post("/api/auth/logout", authenticateToken, async (req, res) => {
     });
   } catch (e) {
     console.error("Logout error:", e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// Check login requirements endpoint
+app.post("/api/auth/check-requirements", async (req, res) => {
+  try {
+    const { username } = req.body;
+    
+    if (!username) {
+      return res.status(400).json({ error: "Username required" });
+    }
+    
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    res.json({
+      requirePasswordChange: user.mustChangePassword || user.isTemporaryPassword,
+      requireDeviceAgreement: !user.deviceAgreementAccepted && !user.roles.includes('admin'),
+      accountStatus: user.accountStatus,
+      isTemporaryPassword: user.isTemporaryPassword
+    });
+  } catch (error) {
+    console.error("Check requirements error:", error);
     res.status(500).json({ error: "server error" });
   }
 });
@@ -566,6 +803,225 @@ app.get("/api/admin/audit-logs", authenticateToken, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "server error" });
+  }
+});
+
+// Create new user endpoint
+app.post("/api/admin/users/create", authenticateToken, async (req, res) => {
+  try {
+    if (!req.user.roles.includes("admin")) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const { username, temporaryPassword, role } = req.body;
+
+    if (!username || !temporaryPassword || !role) {
+      return res.status(400).json({ error: "Username, temporary password, and role are required" });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ username });
+    if (existingUser) {
+      return res.status(409).json({ error: "User already exists" });
+    }
+
+    // Validate role
+    if (!['user', 'admin'].includes(role)) {
+      return res.status(400).json({ error: "Invalid role. Must be 'user' or 'admin'" });
+    }
+
+    // Hash the temporary password
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+
+    // Create new user
+    const newUser = await User.create({
+      username,
+      passwordHash,
+      roles: [role],
+      isTemporaryPassword: true,
+      mustChangePassword: true,
+      accountStatus: 'active',
+      createdBy: req.user.username
+    });
+
+    res.json({ 
+      message: "User created successfully", 
+      user: {
+        id: newUser._id,
+        username: newUser.username,
+        roles: newUser.roles,
+        accountStatus: newUser.accountStatus,
+        mustChangePassword: newUser.mustChangePassword
+      }
+    });
+  } catch (error) {
+    console.error("Error creating user:", error);
+    res.status(500).json({ error: "Failed to create user" });
+  }
+});
+
+// Change password endpoint
+app.post("/api/auth/change-password", authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({ error: "All password fields are required" });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: "New passwords do not match" });
+    }
+
+    // Get user
+    const user = await User.findOne({ username: req.user.username });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Verify current password
+    const isValidPassword = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isValidPassword) {
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+
+    // Hash new password
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+
+    // Update user
+    await User.findByIdAndUpdate(user._id, {
+      passwordHash: newPasswordHash,
+      isTemporaryPassword: false,
+      mustChangePassword: false
+    });
+
+    // Log password change
+    await PasswordChangeLog.create({
+      userId: user.username,
+      changedBy: 'self',
+      reason: user.mustChangePassword ? 'forced' : 'voluntary'
+    });
+
+    res.json({ message: "Password changed successfully" });
+  } catch (error) {
+    console.error("Error changing password:", error);
+    res.status(500).json({ error: "Failed to change password" });
+  }
+});
+
+// Device agreement endpoint
+app.post("/api/auth/device-agreement", authenticateToken, async (req, res) => {
+  try {
+    const { deviceFingerprint, deviceInfo, agreed } = req.body;
+
+    if (!deviceFingerprint || !deviceInfo || agreed === undefined) {
+      return res.status(400).json({ error: "Device fingerprint, device info, and agreement status are required" });
+    }
+
+    if (!agreed) {
+      return res.status(400).json({ error: "Device agreement must be accepted" });
+    }
+
+    // Update user with device agreement
+    await User.findOneAndUpdate(
+      { username: req.user.username },
+      {
+        deviceAgreementAccepted: true,
+        allowedDeviceFingerprint: deviceFingerprint
+      }
+    );
+
+    // Create or update user session
+    await UserSession.findOneAndUpdate(
+      { userId: req.user.username, deviceFingerprint },
+      {
+        deviceInfo,
+        ipAddress: req.ip,
+        lastActivity: new Date(),
+        isActive: true,
+        status: 'active'
+      },
+      { upsert: true }
+    );
+
+    res.json({ message: "Device agreement accepted successfully" });
+  } catch (error) {
+    console.error("Error processing device agreement:", error);
+    res.status(500).json({ error: "Failed to process device agreement" });
+  }
+});
+
+// Get user sessions for admin
+app.get("/api/admin/users/:userId/sessions", authenticateToken, async (req, res) => {
+  try {
+    if (!req.user.roles.includes("admin")) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const { userId } = req.params;
+    const sessions = await UserSession.find({ userId }).sort({ lastActivity: -1 });
+
+    res.json({ sessions });
+  } catch (error) {
+    console.error("Error fetching user sessions:", error);
+    res.status(500).json({ error: "Failed to fetch user sessions" });
+  }
+});
+
+// Update session status
+app.patch("/api/admin/sessions/:sessionId/status", authenticateToken, async (req, res) => {
+  try {
+    if (!req.user.roles.includes("admin")) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const { sessionId } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'locked', 'terminated'].includes(status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+
+    await UserSession.findByIdAndUpdate(sessionId, { status });
+
+    res.json({ message: "Session status updated successfully" });
+  } catch (error) {
+    console.error("Error updating session status:", error);
+    res.status(500).json({ error: "Failed to update session status" });
+  }
+});
+
+// Lock/unlock user account
+app.patch("/api/admin/users/:userId/status", authenticateToken, async (req, res) => {
+  try {
+    if (!req.user.roles.includes("admin")) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const { userId } = req.params;
+    const { accountStatus } = req.body;
+
+    if (!['active', 'locked', 'suspended'].includes(accountStatus)) {
+      return res.status(400).json({ error: "Invalid account status" });
+    }
+
+    await User.findOneAndUpdate(
+      { username: userId },
+      { accountStatus }
+    );
+
+    // If locking account, terminate all active sessions
+    if (accountStatus === 'locked' || accountStatus === 'suspended') {
+      await UserSession.updateMany(
+        { userId, status: 'active' },
+        { status: 'terminated' }
+      );
+    }
+
+    res.json({ message: "User account status updated successfully" });
+  } catch (error) {
+    console.error("Error updating user status:", error);
+    res.status(500).json({ error: "Failed to update user status" });
   }
 });
 
@@ -983,110 +1439,110 @@ app.get("/api/audio/:id/section", authenticateToken, async (req, res) => {
 
     console.log("✅ Users seeded");
 
-    // Seed audio files (example from old static AUDIO_FILES)
-    const filesToSeed = [
-      {
-        filename: "voice.mp3",
-        path: path.resolve("./assets/voice.mp3"),
-        permissions: ["admin", "user1"],
-        sections: [
-          { label: "Introduction", startTime: 0 },
-          { label: "Topic 1", startTime: 240 },
-          { label: "Topic 2", startTime: 1200 },
-          { label: "Conclusion", startTime: 2100 },
-        ],
-      },
-      {
-        filename: "BY WAY OF ACCIDENT.mp3",
-        path: path.resolve("./assets/BY WAY OF ACCIDENT.mp3"),
-        permissions: ["admin"],
-        sections: [
-          { label: "Opening Credits", startTime: 0 },
-          { label: "Acknowledgements", startTime: 14 },
-          { label: "Foreword", startTime: 222 },
-          { label: "Introduction", startTime: 2726 },
-          { label: "Notes", startTime: 3554 },
+    // // Seed audio files (example from old static AUDIO_FILES)
+    // const filesToSeed = [
+    //   {
+    //     filename: "voice.mp3",
+    //     path: path.resolve("./assets/voice.mp3"),
+    //     permissions: ["admin", "user1"],
+    //     sections: [
+    //       { label: "Introduction", startTime: 0 },
+    //       { label: "Topic 1", startTime: 240 },
+    //       { label: "Topic 2", startTime: 1200 },
+    //       { label: "Conclusion", startTime: 2100 },
+    //     ],
+    //   },
+    //   {
+    //     filename: "BY WAY OF ACCIDENT.mp3",
+    //     path: path.resolve("./assets/BY WAY OF ACCIDENT.mp3"),
+    //     permissions: ["admin"],
+    //     sections: [
+    //       { label: "Opening Credits", startTime: 0 },
+    //       { label: "Acknowledgements", startTime: 14 },
+    //       { label: "Foreword", startTime: 222 },
+    //       { label: "Introduction", startTime: 2726 },
+    //       { label: "Notes", startTime: 3554 },
 
-          // Chapters
-          { label: "Chapter 1", startTime: 3663 },
-          { label: "Chapter 2", startTime: 6148 },
-          { label: "Chapter 3", startTime: 9026 },
-          { label: "Chapter 4", startTime: 10987 },
-          { label: "Chapter 5", startTime: 13626 },
-          { label: "Chapter 6", startTime: 15516 },
-          { label: "Chapter 7", startTime: 18234 },
-          { label: "Chapter 8", startTime: 20920 },
-          { label: "Chapter 9", startTime: 24280 },
-          { label: "Chapter 10", startTime: 26298 },
-          { label: "Chapter 11", startTime: 28293 },
-          { label: "Chapter 12", startTime: 31875 },
-          { label: "Chapter 13", startTime: 34156 },
-          { label: "Chapter 14", startTime: 36520 },
-          { label: "Chapter 15", startTime: 38745 },
-          { label: "Chapter 16", startTime: 40818 },
-          { label: "Chapter 17", startTime: 43279 },
-          { label: "Chapter 18", startTime: 45397 },
-          { label: "Chapter 19", startTime: 47568 },
-          { label: "Chapter 20", startTime: 49737 },
+    //       // Chapters
+    //       { label: "Chapter 1", startTime: 3663 },
+    //       { label: "Chapter 2", startTime: 6148 },
+    //       { label: "Chapter 3", startTime: 9026 },
+    //       { label: "Chapter 4", startTime: 10987 },
+    //       { label: "Chapter 5", startTime: 13626 },
+    //       { label: "Chapter 6", startTime: 15516 },
+    //       { label: "Chapter 7", startTime: 18234 },
+    //       { label: "Chapter 8", startTime: 20920 },
+    //       { label: "Chapter 9", startTime: 24280 },
+    //       { label: "Chapter 10", startTime: 26298 },
+    //       { label: "Chapter 11", startTime: 28293 },
+    //       { label: "Chapter 12", startTime: 31875 },
+    //       { label: "Chapter 13", startTime: 34156 },
+    //       { label: "Chapter 14", startTime: 36520 },
+    //       { label: "Chapter 15", startTime: 38745 },
+    //       { label: "Chapter 16", startTime: 40818 },
+    //       { label: "Chapter 17", startTime: 43279 },
+    //       { label: "Chapter 18", startTime: 45397 },
+    //       { label: "Chapter 19", startTime: 47568 },
+    //       { label: "Chapter 20", startTime: 49737 },
 
-          // Closing Sections
-          { label: "Epilogue", startTime: 51820 },
-          { label: "Closing Credits", startTime: 52550 },
-          { label: "The End", startTime: 52567 },
-        ],
-      },
-    ];
+    //       // Closing Sections
+    //       { label: "Epilogue", startTime: 51820 },
+    //       { label: "Closing Credits", startTime: 52550 },
+    //       { label: "The End", startTime: 52567 },
+    //     ],
+    //   },
+    // ];
 
-    for (const f of filesToSeed) {
-      if (!fs.existsSync(f.path)) {
-        console.warn(`⚠️ Skipping ${f.filename}, file not found`);
-        continue;
-      }
+    // for (const f of filesToSeed) {
+    //   if (!fs.existsSync(f.path)) {
+    //     console.warn(`⚠️ Skipping ${f.filename}, file not found`);
+    //     continue;
+    //   }
 
-      const stat = fs.statSync(f.path);
-      const totalChunks = Math.ceil(stat.size / CHUNK_SIZE);
+    //   const stat = fs.statSync(f.path);
+    //   const totalChunks = Math.ceil(stat.size / CHUNK_SIZE);
 
-      const audioDoc = await AudioFile.create({
-        filename: f.filename,
-        sizeBytes: stat.size,
-        chunkSize: CHUNK_SIZE,
-        totalChunks,
-        sections: f.sections,
-        permissions: f.permissions,
-      });
+    //   const audioDoc = await AudioFile.create({
+    //     filename: f.filename,
+    //     sizeBytes: stat.size,
+    //     chunkSize: CHUNK_SIZE,
+    //     totalChunks,
+    //     sections: f.sections,
+    //     permissions: f.permissions,
+    //   });
 
-      // Chunk + encrypt
-      const fd = fs.openSync(f.path, "r");
-      for (let i = 0; i < totalChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(stat.size, start + CHUNK_SIZE);
-        const size = end - start;
-        const buffer = Buffer.alloc(size);
-        fs.readSync(fd, buffer, 0, size, start);
+    //   // Chunk + encrypt
+    //   const fd = fs.openSync(f.path, "r");
+    //   for (let i = 0; i < totalChunks; i++) {
+    //     const start = i * CHUNK_SIZE;
+    //     const end = Math.min(stat.size, start + CHUNK_SIZE);
+    //     const size = end - start;
+    //     const buffer = Buffer.alloc(size);
+    //     fs.readSync(fd, buffer, 0, size, start);
 
-        const iv = crypto.randomBytes(12); // 96-bit for GCM
-        const cipher = crypto.createCipheriv("aes-256-gcm", ENC_KEY, iv);
-        const encrypted = Buffer.concat([
-          cipher.update(buffer),
-          cipher.final(),
-        ]);
-        const tag = cipher.getAuthTag();
+    //     const iv = crypto.randomBytes(12); // 96-bit for GCM
+    //     const cipher = crypto.createCipheriv("aes-256-gcm", ENC_KEY, iv);
+    //     const encrypted = Buffer.concat([
+    //       cipher.update(buffer),
+    //       cipher.final(),
+    //     ]);
+    //     const tag = cipher.getAuthTag();
 
-        await AudioChunk.create({
-          fileId: audioDoc._id,
-          index: i,
-          iv,
-          tag,
-          data: encrypted,
-          plainSize: size,
-        });
+    //     await AudioChunk.create({
+    //       fileId: audioDoc._id,
+    //       index: i,
+    //       iv,
+    //       tag,
+    //       data: encrypted,
+    //       plainSize: size,
+    //     });
 
-        process.stdout.write(`Chunk ${i + 1}/${totalChunks} seeded…\\r`);
-      }
-      fs.closeSync(fd);
+    //     process.stdout.write(`Chunk ${i + 1}/${totalChunks} seeded…\\r`);
+    //   }
+    //   fs.closeSync(fd);
 
-      console.log(`\\n✅ Seeded ${f.filename} (${totalChunks} chunks)`);
-    }
+    //   console.log(`\\n✅ Seeded ${f.filename} (${totalChunks} chunks)`);
+    // }
   }
   //await mongoose.disconnect();
   console.log("🎉 Seeding complete!");

@@ -1931,6 +1931,637 @@ input[type="email"] {
     }
 }
 
+/* User Management Enhancements */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.user-card {
+  border-left: 4px solid #28a745;
+  transition: all 0.3s ease;
+}
+
+.user-card.locked {
+  border-left-color: #dc3545;
+  background-color: #fff5f5;
+}
+
+.user-card.suspended {
+  border-left-color: #ffc107;
+  background-color: #fffbf0;
+}
+
+.user-card.disabled {
+  border-left-color: #6c757d;
+  background-color: #f8f9fa;
+  opacity: 0.7;
+}
+
+.user-status {
+  font-size: 0.8em;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-top: 4px;
+}
+
+.user-status.active {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.user-status.locked {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.user-status.suspended {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.user-status.disabled {
+  background-color: #e2e3e5;
+  color: #383d41;
+}
+
+.action-btn.lock {
+  background-color: #dc3545;
+  color: white;
+}
+
+.action-btn.unlock {
+  background-color: #28a745;
+  color: white;
+}
+
+.action-btn.sessions {
+  background-color: #17a2b8;
+  color: white;
+}
+
+/* User Management Modals */
+
+/* Create User Modal */
+.create-user-modal .modal-header {
+    background: linear-gradient(135deg, #e6fffa, #b2f5ea);
+    border-bottom: 1px solid #38b2ac;
+}
+
+.create-user-modal .modal-header h3 {
+    color: #234e52;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.create-user-modal {
+    border: 2px solid #38b2ac;
+    box-shadow: 0 20px 40px rgba(56, 178, 172, 0.2);
+}
+
+/* Password Change Modal */
+.password-change-modal .modal-header {
+    background: linear-gradient(135deg, #fef5e7, #fed7aa);
+    border-bottom: 1px solid #ed8936;
+}
+
+.password-change-modal .modal-header h3 {
+    color: #c05621;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.password-change-modal {
+    border: 2px solid #ed8936;
+    box-shadow: 0 20px 40px rgba(237, 137, 54, 0.2);
+}
+
+/* Device Agreement Modal */
+.device-agreement-modal .modal-header {
+    background: linear-gradient(135deg, #e6fffa, #bee3f8);
+    border-bottom: 1px solid #3182ce;
+}
+
+.device-agreement-modal .modal-header h3 {
+    color: #2c5282;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.device-agreement-modal {
+    border: 2px solid #3182ce;
+    box-shadow: 0 20px 40px rgba(49, 130, 206, 0.2);
+}
+
+/* User Sessions Management Modal */
+.user-sessions-modal .modal-header {
+    background: linear-gradient(135deg, #f7fafc, #edf2f7);
+    border-bottom: 1px solid #718096;
+}
+
+.user-sessions-modal .modal-header h3 {
+    color: #2d3748;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.user-sessions-modal {
+    border: 2px solid #718096;
+    box-shadow: 0 20px 40px rgba(113, 128, 150, 0.2);
+    max-width: 800px;
+}
+
+/* Form Groups for User Management */
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #4a5568;
+    font-size: 0.9rem;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 1rem;
+    transition: all 0.2s ease;
+    background: white;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-group input.error,
+.form-group select.error {
+    border-color: #e53e3e;
+    box-shadow: 0 0 0 3px rgba(229, 62, 62, 0.1);
+}
+
+.form-group .error-message {
+    color: #e53e3e;
+    font-size: 0.8rem;
+    margin-top: 4px;
+    display: block;
+}
+
+/* Password Strength Indicator */
+.password-strength {
+    margin-top: 8px;
+    height: 4px;
+    background: #e2e8f0;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.password-strength-bar {
+    height: 100%;
+    transition: all 0.3s ease;
+    border-radius: 2px;
+}
+
+.password-strength.weak .password-strength-bar {
+    width: 25%;
+    background: #e53e3e;
+}
+
+.password-strength.fair .password-strength-bar {
+    width: 50%;
+    background: #ed8936;
+}
+
+.password-strength.good .password-strength-bar {
+    width: 75%;
+    background: #38b2ac;
+}
+
+.password-strength.strong .password-strength-bar {
+    width: 100%;
+    background: #48bb78;
+}
+
+.password-requirements {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    color: #718096;
+}
+
+.password-requirements ul {
+    margin: 4px 0 0 16px;
+    padding: 0;
+}
+
+.password-requirements li {
+    margin: 2px 0;
+}
+
+.password-requirements li.valid {
+    color: #48bb78;
+}
+
+.password-requirements li.invalid {
+    color: #e53e3e;
+}
+
+/* Session Management Modal Improvements */
+.user-sessions-modal .modal-content {
+  max-width: 1000px;
+  width: 95vw;
+}
+
+.user-selection {
+  background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  border: 1px solid #e2e8f0;
+}
+
+.user-selection label {
+  font-weight: 600;
+  color: #2d3748;
+  margin-bottom: 10px;
+  display: block;
+}
+
+#userSelect {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 16px;
+  background: white;
+  transition: all 0.3s ease;
+}
+
+#userSelect:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+  outline: none;
+}
+
+.sessions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 15px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 10px;
+}
+
+.sessions-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+#sessionCount {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+}
+
+.sessions-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.sessions-table th {
+  background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+  color: white;
+  padding: 15px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.sessions-table td {
+  padding: 15px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: top;
+}
+
+.sessions-table tr:hover {
+  background: #f7fafc;
+}
+
+.device-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.device-name {
+  font-weight: 600;
+  color: #2d3748;
+  margin-bottom: 4px;
+}
+
+.device-ip {
+  color: #718096;
+  font-size: 0.85rem;
+}
+
+.time-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.login-time {
+  font-weight: 500;
+  color: #2d3748;
+  margin-bottom: 4px;
+}
+
+.last-activity {
+  color: #718096;
+  font-size: 0.85rem;
+}
+
+.session-status {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-active {
+  background: #c6f6d5;
+  color: #22543d;
+}
+
+.status-locked {
+  background: #fed7d7;
+  color: #742a2a;
+}
+
+.session-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.session-actions .btn {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-warning {
+  background: #ed8936;
+  color: white;
+}
+
+.btn-warning:hover {
+  background: #dd6b20;
+  transform: translateY(-1px);
+}
+
+.btn-success {
+  background: #48bb78;
+  color: white;
+}
+
+.btn-success:hover {
+  background: #38a169;
+  transform: translateY(-1px);
+}
+
+.btn-danger {
+  background: #f56565;
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #e53e3e;
+  transform: translateY(-1px);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #718096;
+}
+
+.empty-icon {
+  font-size: 3rem;
+  display: block;
+  margin-bottom: 15px;
+}
+
+.empty-state p {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: #4a5568;
+}
+
+.empty-state small {
+  font-size: 0.9rem;
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 15px;
+  background: #f7fafc;
+  border-radius: 8px;
+}
+
+.bulk-actions .btn {
+  padding: 10px 20px;
+  font-size: 0.9rem;
+}
+
+/* Device Info */
+.device-info {
+    background: #f7fafc;
+    padding: 16px;
+    border-radius: 8px;
+    margin: 16px 0;
+    border-left: 4px solid #3182ce;
+}
+
+.device-info h4 {
+    color: #2d3748;
+    margin-bottom: 8px;
+    font-size: 1rem;
+}
+
+.device-info p {
+    color: #718096;
+    margin: 4px 0;
+    font-size: 0.9rem;
+}
+
+/* Agreement Text */
+.agreement-text {
+    background: #f7fafc;
+    padding: 20px;
+    border-radius: 8px;
+    margin: 16px 0;
+    border: 1px solid #e2e8f0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.agreement-text h4 {
+    color: #2d3748;
+    margin-bottom: 12px;
+}
+
+.agreement-text p {
+    color: #4a5568;
+    line-height: 1.6;
+    margin-bottom: 12px;
+}
+
+.agreement-text ul {
+    margin-left: 20px;
+    color: #4a5568;
+}
+
+.agreement-text li {
+    margin-bottom: 8px;
+}
+
+/* Checkbox Agreement */
+.checkbox-group {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 16px 0;
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    transform: scale(1.2);
+}
+
+.checkbox-group label {
+    margin: 0;
+    color: #4a5568;
+    line-height: 1.5;
+    cursor: pointer;
+}
+
+/* Action Buttons for Sessions */
+.session-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    border-radius: 6px;
+}
+
+.btn-lock {
+    background: #e53e3e;
+    color: white;
+    border: none;
+}
+
+.btn-lock:hover {
+    background: #c53030;
+}
+
+.btn-unlock {
+    background: #48bb78;
+    color: white;
+    border: none;
+}
+
+.btn-unlock:hover {
+    background: #38a169;
+}
+
+.btn-terminate {
+    background: #ed8936;
+    color: white;
+    border: none;
+}
+
+.btn-terminate:hover {
+    background: #dd6b20;
+}
+
+/* Modal Size Adjustments */
+.user-sessions-modal .modal-content {
+    max-width: 900px;
+}
+
+.create-user-modal .modal-content,
+.password-change-modal .modal-content,
+.device-agreement-modal .modal-content {
+    max-width: 500px;
+}
+
+/* Responsive adjustments for user management modals */
+@media (max-width: 768px) {
+    .user-sessions-modal .modal-content {
+        max-width: 95%;
+        margin: 0 10px;
+    }
+    
+    .sessions-table {
+        font-size: 0.8rem;
+    }
+    
+    .sessions-table th,
+    .sessions-table td {
+        padding: 8px 6px;
+    }
+    
+    .session-actions {
+        flex-direction: column;
+        gap: 4px;
+    }
+    
+    .btn-sm {
+        width: 100%;
+    }
+}
+
 /* Print Styles */
 @media print {
     body {

@@ -211,6 +211,186 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="app.js"></script>
+
+    <!-- Create User Modal -->
+    <div id="createUserModal" class="modal create-user-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>👤 Create New User</h3>
+            </div>
+            <div class="modal-body">
+                <form id="createUserForm">
+                    <div class="form-group">
+                        <label for="newUsername">Username</label>
+                        <input type="text" id="newUsername" name="username" required>
+                        <span class="error-message" id="usernameError"></span>
+                    </div>
+                    <div class="form-group">
+                        <label for="temporaryPassword">Temporary Password</label>
+                        <input type="password" id="temporaryPassword" name="password" required>
+                        <div class="password-strength" id="passwordStrength">
+                            <div class="password-strength-bar"></div>
+                        </div>
+                        <div class="password-requirements">
+                            <ul>
+                                <li id="lengthReq">At least 8 characters</li>
+                                <li id="upperReq">One uppercase letter</li>
+                                <li id="lowerReq">One lowercase letter</li>
+                                <li id="numberReq">One number</li>
+                                <li id="specialReq">One special character</li>
+                            </ul>
+                        </div>
+                        <span class="error-message" id="passwordError"></span>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmPassword">Confirm Password</label>
+                        <input type="password" id="confirmPassword" name="confirmPassword" required>
+                        <span class="error-message" id="confirmPasswordError"></span>
+                    </div>
+                    <div class="form-group">
+                        <label for="userRole">User Role</label>
+                        <select id="userRole" name="role" required>
+                            <option value="user">User</option>
+                            <option value="admin">Administrator</option>
+                        </select>
+                        <span class="error-message" id="roleError"></span>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="createUserCancel">Cancel</button>
+                <button class="btn btn-primary" id="createUserSubmit">Create User</button>
+            </div>
+        </div>
+        <div class="modal-backdrop"></div>
+    </div>
+
+    <!-- Password Change Modal -->
+    <div id="passwordChangeModal" class="modal password-change-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔐 Change Password Required</h3>
+            </div>
+            <div class="modal-body">
+                <p>You must change your temporary password before continuing.</p>
+                <form id="passwordChangeForm">
+                    <div class="form-group">
+                        <label for="currentPassword">Current Password</label>
+                        <input type="password" id="currentPassword" name="currentPassword" required>
+                        <span class="error-message" id="currentPasswordError"></span>
+                    </div>
+                    <div class="form-group">
+                        <label for="newPassword">New Password</label>
+                        <input type="password" id="newPassword" name="newPassword" required>
+                        <div class="password-strength" id="newPasswordStrength">
+                            <div class="password-strength-bar"></div>
+                        </div>
+                        <div class="password-requirements">
+                            <ul>
+                                <li id="newLengthReq">At least 8 characters</li>
+                                <li id="newUpperReq">One uppercase letter</li>
+                                <li id="newLowerReq">One lowercase letter</li>
+                                <li id="newNumberReq">One number</li>
+                                <li id="newSpecialReq">One special character</li>
+                            </ul>
+                        </div>
+                        <span class="error-message" id="newPasswordError"></span>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmNewPassword">Confirm New Password</label>
+                        <input type="password" id="confirmNewPassword" name="confirmNewPassword" required>
+                        <span class="error-message" id="confirmNewPasswordError"></span>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="passwordChangeSubmit">Change Password</button>
+            </div>
+        </div>
+        <div class="modal-backdrop"></div>
+    </div>
+
+    <!-- Device Agreement Modal -->
+    <div id="deviceAgreementModal" class="modal device-agreement-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📱 Device Access Policy</h3>
+            </div>
+            <div class="modal-body">
+                <div class="device-info">
+                    <h4>Current Device Information</h4>
+                    <p><strong>Browser:</strong> <span id="deviceBrowser">Unknown</span></p>
+                    <p><strong>Operating System:</strong> <span id="deviceOS">Unknown</span></p>
+                    <p><strong>IP Address:</strong> <span id="deviceIP">Unknown</span></p>
+                    <p><strong>Login Time:</strong> <span id="loginTime">Unknown</span></p>
+                </div>
+                <div class="agreement-text">
+                    <h4>Single Device Access Policy</h4>
+                    <p>For security reasons, this application enforces a single-device access policy:</p>
+                    <ul>
+                        <li>You can only be logged in from one device at a time</li>
+                        <li>Logging in from a new device will automatically log you out from other devices</li>
+                        <li>Your account will be temporarily locked if suspicious activity is detected</li>
+                        <li>All login sessions are monitored and logged for security purposes</li>
+                        <li>You must agree to these terms to continue using the application</li>
+                    </ul>
+                    <p>By continuing, you acknowledge that you understand and agree to this policy.</p>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="agreeToPolicy" required>
+                    <label for="agreeToPolicy">I understand and agree to the single-device access policy</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="deviceAgreementDecline">Decline & Logout</button>
+                <button class="btn btn-primary" id="deviceAgreementAccept" disabled>Accept & Continue</button>
+            </div>
+        </div>
+        <div class="modal-backdrop"></div>
+    </div>
+
+    <!-- User Sessions Management Modal -->
+    <div id="userSessionsModal" class="modal user-sessions-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>👥 User Sessions Management</h3>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="userSelect">Select User</label>
+                    <select id="userSelect">
+                        <option value="">Choose a user...</option>
+                    </select>
+                </div>
+                <div id="userSessionsContent" style="display: none;">
+                    <h4>Active Sessions for: <span id="selectedUserName"></span></h4>
+                    <table class="sessions-table">
+                        <thead>
+                            <tr>
+                                <th>Device</th>
+                                <th>IP Address</th>
+                                <th>Login Time</th>
+                                <th>Last Activity</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessionsTableBody">
+                            <!-- Sessions will be populated here -->
+                        </tbody>
+                    </table>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" id="lockAllSessions">Lock All Sessions</button>
+                        <button class="btn btn-primary" id="unlockAllSessions">Unlock All Sessions</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="userSessionsClose">Close</button>
+            </div>
+        </div>
+        <div class="modal-backdrop"></div>
+    </div>
 </body>
 
 </html>
