@@ -113,6 +113,43 @@
                 </div>
             </div>
 
+            <!-- Admin Panel (only visible to admin users) -->
+            <div class="admin-panel" id="adminPanel" style="display: none;">
+                <h2 class="admin-title">🔧 Admin Panel - Permission Management</h2>
+                
+                <div class="admin-tabs">
+                    <button class="tab-btn active" id="permissionsTab">Permissions Matrix</button>
+                    <button class="tab-btn" id="usersTab">Users</button>
+                    <button class="tab-btn" id="filesTab">Files</button>
+                </div>
+
+                <div class="tab-content" id="permissionsTabContent">
+                    <div class="permissions-matrix">
+                        <div class="matrix-container" id="permissionsMatrix">
+                            <div class="loading-placeholder">Loading permissions...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="usersTabContent" style="display: none;">
+                    <div class="users-list">
+                        <h3>System Users</h3>
+                        <div class="users-container" id="usersContainer">
+                            <div class="loading-placeholder">Loading users...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="filesTabContent" style="display: none;">
+                    <div class="files-list">
+                        <h3>Audio Files</h3>
+                        <div class="files-container" id="filesContainer">
+                            <div class="loading-placeholder">Loading files...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="controls-section">
                 <button class="btn btn-secondary" id="refreshBtn">
                     <span class="btn-icon">🔄</span>
@@ -133,6 +170,24 @@
             <div class="loading-spinner"></div>
             <p id="loadingText">Loading...</p>
         </div>
+    </div>
+
+    <!-- Session Extension Modal -->
+    <div id="sessionExtensionModal" class="modal" style="display: none;">
+        <div class="modal-content session-extension-modal">
+            <div class="modal-header">
+                <h3>⏰ Session Expiring Soon</h3>
+            </div>
+            <div class="modal-body">
+                <p>Your session will expire in <span id="sessionExpiryTime" class="expiry-time">2:00</span>.</p>
+                <p>Would you like to extend your session for another 30 minutes?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="sessionExtensionCancel">Let it expire</button>
+                <button class="btn btn-primary" id="sessionExtensionExtend">Extend Session</button>
+            </div>
+        </div>
+        <div class="modal-backdrop"></div>
     </div>
 
     <!-- Confirmation Modal -->

@@ -121,8 +121,70 @@ const AudioChunkSchema = new mongoose.Schema(
 AudioChunkSchema.index({ fileId: 1, index: 1 }, { unique: true });
 const AudioChunk = mongoose.model("AudioChunk", AudioChunkSchema);
 
+// Permission Management Schema
+const PermissionSchema = new mongoose.Schema(
+  {
+    userId: { type: String, required: true, index: true }, // username
+    fileId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
+    grantedBy: { type: String, required: true }, // admin username who granted access
+    grantedAt: { type: Date, default: Date.now },
+    revokedAt: { type: Date, default: null },
+    revokedBy: { type: String, default: null },
+    isActive: { type: Boolean, default: true, index: true }
+  },
+  { timestamps: true }
+);
+PermissionSchema.index({ userId: 1, fileId: 1 }, { unique: true });
+const Permission = mongoose.model("Permission", PermissionSchema);
+
+// Audit Log Schema for tracking permission changes
+const AuditLogSchema = new mongoose.Schema(
+  {
+    action: { type: String, required: true, enum: ['grant', 'revoke'], index: true },
+    userId: { type: String, required: true, index: true }, // target user
+    fileId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
+    filename: { type: String, required: true }, // for easier reading
+    performedBy: { type: String, required: true }, // admin who performed the action
+    timestamp: { type: Date, default: Date.now, index: true },
+    details: { type: String } // optional additional details
+  },
+  { timestamps: true }
+);
+AuditLogSchema.index({ timestamp: -1 }); // for efficient querying by date
+const AuditLog = mongoose.model("AuditLog", AuditLogSchema);
+
 // ----------------------------
-// Auth
+// Permission checking utilities
+// ----------------------------
+async function hasFileAccess(userId, fileId) {
+  try {
+    // Check new Permission schema first
+    const permission = await Permission.findOne({
+      userId: userId,
+      fileId: fileId,
+      isActive: true,
+      revokedAt: null
+    });
+    
+    if (permission) {
+      return true;
+    }
+    
+    // Fallback to legacy permissions array in AudioFile
+    const audioFile = await AudioFile.findById(fileId);
+    if (audioFile && audioFile.permissions.includes(userId)) {
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error checking file access:', error);
+    return false;
+  }
+}
+
+// ----------------------------
+// JWT utilities
 // ----------------------------
 function signJWT(payload, expiresIn = "30m") {
   return jwt.sign(payload, JWT_SECRET, { expiresIn });
@@ -162,11 +224,47 @@ app.post("/api/auth/login", authLimiter, async (req, res) => {
     res.json({
       success: true,
       token,
-      user: { username: u.username },
+      user: { username: u.username, roles: u.roles },
       expiresIn: 1800,
     });
   } catch (e) {
     console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+app.post("/api/auth/refresh", authenticateToken, async (req, res) => {
+  try {
+    // Get user from the authenticated token
+    const u = await User.findOne({ username: req.user.userId });
+    if (!u) return res.status(401).json({ error: "user not found" });
+    
+    // Generate new token with fresh 30-minute expiry
+    const newToken = signJWT({ userId: u.username }, "30m");
+    
+    res.json({
+      success: true,
+      token: newToken,
+      user: { username: u.username, roles: u.roles },
+      expiresIn: 1800,
+      message: "Session extended successfully"
+    });
+  } catch (e) {
+    console.error("Refresh token error:", e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+app.post("/api/auth/logout", authenticateToken, async (req, res) => {
+  try {
+    // In a more sophisticated implementation, you might maintain a blacklist of tokens
+    // For now, we'll just acknowledge the logout request
+    res.json({
+      success: true,
+      message: "Logged out successfully"
+    });
+  } catch (e) {
+    console.error("Logout error:", e);
     res.status(500).json({ error: "server error" });
   }
 });
@@ -269,29 +367,257 @@ app.post("/api/admin/ingest", authenticateToken, async (req, res) => {
 });
 
 // ----------------------------
+// Admin Permission Management APIs
+// ----------------------------
+
+// Get all users (admin only)
+app.get("/api/admin/users", authenticateToken, async (req, res) => {
+  try {
+    const me = await User.findOne({ username: req.user.userId });
+    if (!me || !me.roles?.includes("admin"))
+      return res.status(403).json({ error: "admin only" });
+
+    const users = await User.find({}).select("username roles createdAt");
+    res.json({ users });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// Get all files (admin only)
+app.get("/api/admin/files", authenticateToken, async (req, res) => {
+  try {
+    const me = await User.findOne({ username: req.user.userId });
+    if (!me || !me.roles?.includes("admin"))
+      return res.status(403).json({ error: "admin only" });
+
+    const files = await AudioFile.find({}).select("filename sizeBytes totalChunks sections permissions createdAt");
+    res.json({ files });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// Get all permissions (admin only)
+app.get("/api/admin/permissions", authenticateToken, async (req, res) => {
+  try {
+    const me = await User.findOne({ username: req.user.userId });
+    if (!me || !me.roles?.includes("admin"))
+      return res.status(403).json({ error: "admin only" });
+
+    const permissions = await Permission.find({ isActive: true })
+      .populate('fileId', 'filename')
+      .sort({ grantedAt: -1 });
+    
+    res.json({ permissions });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// Grant permission to user for specific file (admin only)
+app.post("/api/admin/permissions/grant", authenticateToken, async (req, res) => {
+  try {
+    const me = await User.findOne({ username: req.user.userId });
+    if (!me || !me.roles?.includes("admin"))
+      return res.status(403).json({ error: "admin only" });
+
+    const { userId, fileId } = req.body;
+    if (!userId || !fileId)
+      return res.status(400).json({ error: "userId and fileId required" });
+
+    // Check if user exists
+    const user = await User.findOne({ username: userId });
+    if (!user)
+      return res.status(404).json({ error: "user not found" });
+
+    // Check if file exists
+    const file = await AudioFile.findById(fileId);
+    if (!file)
+      return res.status(404).json({ error: "file not found" });
+
+    // Check if permission already exists
+    let permission = await Permission.findOne({ userId, fileId });
+    
+    if (permission) {
+      if (permission.isActive) {
+        return res.status(400).json({ error: "permission already exists" });
+      }
+      // Reactivate revoked permission
+      permission.isActive = true;
+      permission.grantedBy = req.user.userId;
+      permission.grantedAt = new Date();
+      permission.revokedAt = null;
+      permission.revokedBy = null;
+      await permission.save();
+    } else {
+      // Create new permission
+      permission = await Permission.create({
+        userId,
+        fileId,
+        grantedBy: req.user.userId
+      });
+    }
+
+    // Also update the legacy permissions array in AudioFile
+    if (!file.permissions.includes(userId)) {
+      file.permissions.push(userId);
+      await file.save();
+    }
+
+    // Log the permission grant action
+    await AuditLog.create({
+      action: 'grant',
+      userId,
+      fileId,
+      filename: file.filename,
+      performedBy: req.user.userId,
+      details: permission.isActive ? 'Permission reactivated' : 'New permission granted'
+    });
+
+    res.json({ success: true, permission });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// Revoke permission from user for specific file (admin only)
+app.delete("/api/admin/permissions/revoke", authenticateToken, async (req, res) => {
+  try {
+    const me = await User.findOne({ username: req.user.userId });
+    if (!me || !me.roles?.includes("admin"))
+      return res.status(403).json({ error: "admin only" });
+
+    const { userId, fileId } = req.body;
+    if (!userId || !fileId)
+      return res.status(400).json({ error: "userId and fileId required" });
+
+    // Find and revoke permission
+    const permission = await Permission.findOne({ userId, fileId, isActive: true });
+    if (!permission)
+      return res.status(404).json({ error: "active permission not found" });
+
+    permission.isActive = false;
+    permission.revokedAt = new Date();
+    permission.revokedBy = req.user.userId;
+    await permission.save();
+
+    // Also update the legacy permissions array in AudioFile
+    const file = await AudioFile.findById(fileId);
+    if (file) {
+      file.permissions = file.permissions.filter(p => p !== userId);
+      await file.save();
+    }
+
+    // Log the permission revoke action
+    await AuditLog.create({
+      action: 'revoke',
+      userId,
+      fileId,
+      filename: file ? file.filename : 'Unknown file',
+      performedBy: req.user.userId,
+      details: 'Permission revoked'
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// Get audit logs (admin only)
+app.get("/api/admin/audit-logs", authenticateToken, async (req, res) => {
+  try {
+    const me = await User.findOne({ username: req.user.userId });
+    if (!me || !me.roles?.includes("admin"))
+      return res.status(403).json({ error: "admin only" });
+
+    const { page = 1, limit = 50, action, userId, fileId } = req.query;
+    const skip = (page - 1) * limit;
+    
+    // Build filter
+    const filter = {};
+    if (action) filter.action = action;
+    if (userId) filter.userId = userId;
+    if (fileId) filter.fileId = fileId;
+
+    const logs = await AuditLog.find(filter)
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    const total = await AuditLog.countDocuments(filter);
+
+    res.json({
+      logs,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// ----------------------------
 // Metadata & listing
 // ----------------------------
 app.get("/api/audio/list", authenticateToken, async (req, res) => {
-  const files = await AudioFile.find({ permissions: req.user.userId }).select(
-    "filename sizeBytes totalChunks sections"
-  );
-  res.json({ files });
+  try {
+    // Get all audio files
+    const allFiles = await AudioFile.find({}).select(
+      "filename sizeBytes totalChunks sections"
+    );
+    
+    // Filter files based on user permissions
+    const accessibleFiles = [];
+    for (const file of allFiles) {
+      const hasAccess = await hasFileAccess(req.user.userId, file._id);
+      if (hasAccess) {
+        accessibleFiles.push(file);
+      }
+    }
+    
+    res.json({ files: accessibleFiles });
+  } catch (error) {
+    console.error('Error listing audio files:', error);
+    res.status(500).json({ error: 'server error' });
+  }
 });
 
 app.get("/api/audio/:id/metadata", authenticateToken, async (req, res) => {
-  const meta = await AudioFile.findById(req.params.id);
-  if (!meta) return res.status(404).json({ error: "not found" });
-  if (!meta.permissions.includes(req.user.userId))
-    return res.status(403).json({ error: "no access" });
-  res.json({
-    _id: meta._id,
-    filename: meta.filename,
-    contentType: meta.contentType,
-    sizeBytes: meta.sizeBytes,
-    chunkSize: meta.chunkSize,
-    totalChunks: meta.totalChunks,
-    sections: meta.sections,
-  });
+  try {
+    const meta = await AudioFile.findById(req.params.id);
+    if (!meta) return res.status(404).json({ error: "not found" });
+    
+    const hasAccess = await hasFileAccess(req.user.userId, meta._id);
+    if (!hasAccess) {
+      return res.status(403).json({ error: "no access" });
+    }
+    
+    res.json({
+      _id: meta._id,
+      filename: meta.filename,
+      contentType: meta.contentType,
+      sizeBytes: meta.sizeBytes,
+      chunkSize: meta.chunkSize,
+      totalChunks: meta.totalChunks,
+      sections: meta.sections,
+    });
+  } catch (error) {
+    console.error('Error getting audio metadata:', error);
+    res.status(500).json({ error: 'server error' });
+  }
 });
 
 // ----------------------------
@@ -323,24 +649,34 @@ function verifySignature({ fileRef, start, end, expires, ip, sig }) {
 
 // Create a signed URL for a specific byte range (client can omit range for full file)
 app.post("/api/audio/:id/signed-url", authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const {
-    start = 0,
-    end = -1,
-    ttlSeconds = 300,
-    bindIp = true,
-  } = req.body || {};
-  const meta = await AudioFile.findById(id);
-  if (!meta) return res.status(404).json({ error: "not found" });
-  if (!meta.permissions.includes(req.user.userId))
-    return res.status(403).json({ error: "no access" });
-  const expires = Date.now() + Math.max(1, Math.min(3600, ttlSeconds)) * 1000;
-  const ip = bindIp ? req.ip || "-" : "-";
-  const sig = hmacSign([id, start, end, expires, ip]);
-  // Client calls GET /api/audio/:id/stream-signed?start=&end=&expires=&sig=
-  res.json({
-    url: `/api/audio/${id}/stream-signed?start=${start}&end=${end}&expires=${expires}&sig=${sig}`,
-  });
+  try {
+    const { id } = req.params;
+    const {
+      start = 0,
+      end = -1,
+      ttlSeconds = 300,
+      bindIp = true,
+    } = req.body || {};
+    
+    const meta = await AudioFile.findById(id);
+    if (!meta) return res.status(404).json({ error: "not found" });
+    
+    const hasAccess = await hasFileAccess(req.user.userId, meta._id);
+    if (!hasAccess) {
+      return res.status(403).json({ error: "no access" });
+    }
+    
+    const expires = Date.now() + Math.max(1, Math.min(3600, ttlSeconds)) * 1000;
+    const ip = bindIp ? req.ip || "-" : "-";
+    const sig = hmacSign([id, start, end, expires, ip]);
+    // Client calls GET /api/audio/:id/stream-signed?start=&end=&expires=&sig=
+    res.json({
+      url: `/api/audio/${id}/stream-signed?start=${start}&end=${end}&expires=${expires}&sig=${sig}`,
+    });
+  } catch (error) {
+    console.error('Error creating signed URL:', error);
+    res.status(500).json({ error: 'server error' });
+  }
 });
 
 // ----------------------------
@@ -428,8 +764,11 @@ app.get(
       const { filename } = req.params;
       const meta = await AudioFile.findOne({ filename });
       if (!meta) return res.status(404).json({ error: "Audio file not found" });
-      if (!meta.permissions.includes(req.user.userId))
+      
+      const hasAccess = await hasFileAccess(req.user.userId, meta._id);
+      if (!hasAccess) {
         return res.status(403).json({ error: "Access denied" });
+      }
 
       const fileSize = meta.sizeBytes;
       const range = req.headers.range;
@@ -484,8 +823,11 @@ app.get(
     try {
       const meta = await AudioFile.findById(req.params.id);
       if (!meta) return res.status(404).json({ error: "not found" });
-      if (!meta.permissions.includes(req.user.userId))
+      
+      const hasAccess = await hasFileAccess(req.user.userId, meta._id);
+      if (!hasAccess) {
         return res.status(403).json({ error: "no access" });
+      }
 
       const fileSize = meta.sizeBytes;
       const range = req.headers.range;
@@ -591,13 +933,22 @@ app.get("/api/audio/:id/stream-signed", streamLimiter, async (req, res) => {
 // Sections helper (jump points by seconds; client seeks accordingly)
 // ----------------------------
 app.get("/api/audio/:id/section", authenticateToken, async (req, res) => {
-  const meta = await AudioFile.findById(req.params.id);
-  if (!meta) return res.status(404).json({ error: "not found" });
-  if (!meta.permissions.includes(req.user.userId))
-    return res.status(403).json({ error: "no access" });
-  const sec = meta.sections.find((s) => s.label === req.query.label);
-  if (!sec) return res.status(404).json({ error: "section not found" });
-  res.json({ startTime: sec.startTime });
+  try {
+    const meta = await AudioFile.findById(req.params.id);
+    if (!meta) return res.status(404).json({ error: "not found" });
+    
+    const hasAccess = await hasFileAccess(req.user.userId, meta._id);
+    if (!hasAccess) {
+      return res.status(403).json({ error: "no access" });
+    }
+    
+    const sec = meta.sections.find((s) => s.label === req.query.label);
+    if (!sec) return res.status(404).json({ error: "section not found" });
+    res.json({ startTime: sec.startTime });
+  } catch (error) {
+    console.error('Error getting section:', error);
+    res.status(500).json({ error: 'server error' });
+  }
 });
 
 // ----------------------------
