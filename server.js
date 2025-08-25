@@ -278,7 +278,7 @@ function authenticateToken(req, res, next) {
         });
       }
       
-      // Fix: Use userId instead of username to match endpoint expectations
+      // CRITICAL FIX: Change 'username' to 'userId' to match endpoint expectations
       req.user = { userId: decoded.userId, roles: user.roles };
       next();
     } catch (error) {
@@ -614,7 +614,7 @@ app.get("/api/admin/users", authenticateToken, async (req, res) => {
     if (!me || !me.roles?.includes("admin"))
       return res.status(403).json({ error: "admin only" });
 
-    const users = await User.find({}).select("username roles createdAt");
+    const users = await User.find({}).select("username roles createdAt accountStatus lastLogin createdBy _id");
     res.json({ users });
   } catch (e) {
     console.error(e);

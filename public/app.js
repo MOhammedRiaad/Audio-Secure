@@ -1134,8 +1134,8 @@ class SecureAudioPlayer {
     }
   }
 
-   renderUsersManagement(users) {
-    const container = document.getElementById('usersManagementContent');
+renderUsersManagement(users) {
+    const container = document.getElementById('usersContainer');
     if (!container) return;
 
     let html = `
@@ -1160,7 +1160,7 @@ class SecureAudioPlayer {
               <span class="user-status ${statusClass}">${statusIcon} ${user.accountStatus}</span>
             </div>
             <div class="user-details">
-              <p><strong>Role:</strong> ${user.role}</p>
+              <p><strong>Role:</strong> ${user.roles ? user.roles.join(', ') : 'user'}</p>
               <p><strong>Created:</strong> ${new Date(user.createdAt).toLocaleDateString()}</p>
               <p><strong>Last Login:</strong> ${lastLogin}</p>
               ${user.createdBy ? `<p><strong>Created by:</strong> ${user.createdBy}</p>` : ''}
@@ -1194,7 +1194,6 @@ class SecureAudioPlayer {
     html += '</div>';
     container.innerHTML = html;
   }
-
   async loadFilesManagement() {
     if (!this.elements.filesContainer) return;
     
@@ -1309,45 +1308,47 @@ class SecureAudioPlayer {
 
   async lockUserAccount(userId) {
     try {
-      const response = await fetch(`${this.API_BASE}/api/admin/users/${userId}/status`, {
-        method: 'PUT',
+      const response = await fetch(`/api/admin/users/${userId}/status`, {
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.authToken}`
         },
-        body: JSON.stringify({ status: 'locked' })
+        body: JSON.stringify({ accountStatus: 'locked' })
       });
-      
+
       if (response.ok) {
         this.showSuccess('User account locked successfully');
-        this.loadUsersManagement(); // Refresh the list
+        this.loadUsersManagement();
       } else {
-        this.showError('Failed to lock user account');
+        const error = await response.json();
+        this.showError(error.error || 'Failed to lock user account');
       }
     } catch (error) {
-      this.showError('Network error while locking user');
+      this.showError('Network error occurred');
     }
   }
 
   async unlockUserAccount(userId) {
     try {
-      const response = await fetch(`${this.API_BASE}/api/admin/users/${userId}/status`, {
-        method: 'PUT',
+      const response = await fetch(`/api/admin/users/${userId}/status`, {
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.authToken}`
+          'Authorization': `Bearer ${this.authToken}` 
         },
-        body: JSON.stringify({ status: 'active' })
+        body: JSON.stringify({ accountStatus: 'active' })
       });
-      
+
       if (response.ok) {
         this.showSuccess('User account unlocked successfully');
-        this.loadUsersManagement(); // Refresh the list
+        this.loadUsersManagement();
       } else {
-        this.showError('Failed to unlock user account');
+        const error = await response.json();
+        this.showError(error.error || 'Failed to unlock user account');
       }
     } catch (error) {
-      this.showError('Network error while unlocking user');
+      this.showError('Network error occurred');
     }
   }
 
@@ -1995,7 +1996,7 @@ class SecureAudioPlayer {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          'Authorization': `Bearer ${this.authToken}`
         },
         body: JSON.stringify({
           username: userData.username,
@@ -2167,7 +2168,7 @@ class SecureAudioPlayer {
     try {
       const response = await fetch('/api/admin/users', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          Authorization: `Bearer ${this.authToken}`
         }
       });
 
@@ -2180,6 +2181,7 @@ class SecureAudioPlayer {
         return [];
       }
     } catch (error) {
+      console.error('Error loading users:', error);
       this.showError('Network error while loading users');
       return [];
     }
@@ -2188,13 +2190,15 @@ class SecureAudioPlayer {
   populateUserSelect(users) {
     const userSelect = document.getElementById('userSelect');
     if (!userSelect) return;
-
+    console.log('Populating user select with users:', users);
     userSelect.innerHTML = '<option value="">🔍 Select a user to view sessions...</option>';
     users.forEach(user => {
       const option = document.createElement('option');
       option.value = user._id;
       const statusIcon = user.accountStatus === 'active' ? '🟢' : '🔴';
-      option.textContent = `${statusIcon} ${user.username} (${user.role})`;
+      const roles = user.roles ? user.roles.join(', ') : 'user';
+      option.textContent = `${statusIcon} ${user.username} (${roles})`;
+      console.log(option.textContent);
       userSelect.appendChild(option);
     });
   }
@@ -2203,7 +2207,7 @@ class SecureAudioPlayer {
     try {
       const response = await fetch(`/api/admin/users/${userId}/sessions`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          'Authorization': `Bearer ${this.authToken}`
         }
       });
 
@@ -2219,84 +2223,72 @@ class SecureAudioPlayer {
   }
 
   renderUserSessions(sessions, userId) {
-    const contentDiv = document.getElementById('userSessionsContent');
-    const tableBody = document.getElementById('sessionsTableBody');
-    const userNameSpan = document.getElementById('selectedUserName');
-    const sessionCount = document.getElementById('sessionCount');
-
-    if (!contentDiv || !tableBody) return;
-
-    // Show content and set user name
-    contentDiv.style.display = 'block';
-    if (userNameSpan) {
+    const userSessionsContent = document.getElementById('userSessionsContent');
+    const selectedUserName = document.getElementById('selectedUserName');
+    const sessionsTableBody = document.getElementById('sessionsTableBody');
+    
+    if (!userSessionsContent || !sessionsTableBody) return;
+    
+    // Show the sessions content
+    userSessionsContent.style.display = 'block';
+    
+    // Update user name and session count
+    if (selectedUserName) {
       const userSelect = document.getElementById('userSelect');
-      const selectedOption = userSelect?.selectedOptions[0];
-      userNameSpan.textContent = selectedOption?.textContent || 'Unknown User';
+      const selectedOption = userSelect.options[userSelect.selectedIndex];
+      selectedUserName.textContent = selectedOption.textContent.split(' ')[1]; // Extract username
     }
-
-    // Update session count
-    if (sessionCount) {
-      sessionCount.textContent = `${sessions.length} session(s)`;
-    }
-
-    // Clear existing rows
-    tableBody.innerHTML = '';
-
+    
+    // Add session count header
+    const existingHeader = userSessionsContent.querySelector('.sessions-header');
+    if (existingHeader) existingHeader.remove();
+    
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'sessions-header';
+    headerDiv.innerHTML = `
+      <h4>👥 Active Sessions</h4>
+      <span id="sessionCount">${sessions.length} session(s)</span>
+    `;
+    userSessionsContent.insertBefore(headerDiv, userSessionsContent.firstChild.nextSibling);
+    
+    // Clear and populate sessions table
+    sessionsTableBody.innerHTML = '';
+    
     if (sessions.length === 0) {
-      const row = document.createElement('tr');
-      row.innerHTML = `
-        <td colspan="6" class="no-sessions">
-          <div class="empty-state">
-            <span class="empty-icon">📱</span>
-            <p>No active sessions found</p>
-            <small>This user has no current login sessions</small>
-          </div>
-        </td>`;
-      tableBody.appendChild(row);
+      sessionsTableBody.innerHTML = `
+        <tr>
+          <td colspan="6" class="sessions-empty">
+            <div>🔍 No active sessions found for this user</div>
+          </td>
+        </tr>
+      `;
       return;
     }
-
-    // Render session rows with improved styling
-    sessions.forEach((session, index) => {
+    
+    sessions.forEach(session => {
       const row = document.createElement('tr');
-      const statusClass = session.status === 'active' ? 'status-active' : 'status-locked';
-      const statusIcon = session.status === 'active' ? '🟢' : '🔒';
-      
       row.innerHTML = `
-        <td class="device-info">
+        <td>
           <div class="device-details">
-            <span class="device-name">${this.formatDeviceInfo(session.deviceInfo)}</span>
-            <small class="device-ip">IP: ${session.ipAddress || 'Unknown'}</small>
+            <div class="device-name">${session.deviceInfo?.browser || 'Unknown Browser'}</div>
+            <div class="device-info">${session.deviceInfo?.os || 'Unknown OS'}</div>
           </div>
         </td>
-        <td class="time-info">
-          <div class="time-details">
-            <span class="login-time">${new Date(session.loginTime).toLocaleString()}</span>
-            <small class="last-activity">Last: ${new Date(session.lastActivity).toLocaleString()}</small>
-          </div>
-        </td>
-        <td class="status-cell">
-          <span class="session-status ${statusClass}">
-            ${statusIcon} ${session.status}
-          </span>
-        </td>
-        <td class="actions-cell">
+        <td>${session.ipAddress}</td>
+        <td>${new Date(session.loginTime).toLocaleString()}</td>
+        <td>${new Date(session.lastActivity).toLocaleString()}</td>
+        <td><span class="status-badge ${session.status}">${session.status}</span></td>
+        <td>
           <div class="session-actions">
             ${session.status === 'active' ? 
-              `<button class="btn btn-sm btn-warning" onclick="audioPlayer.lockUserSession('${userId}', '${session._id}')" title="Lock Session">
-                🔒 Lock
-              </button>` :
-              `<button class="btn btn-sm btn-success" onclick="audioPlayer.unlockUserSession('${userId}', '${session._id}')" title="Unlock Session">
-                🔓 Unlock
-              </button>`
+              `<button class="btn btn-lock" onclick="app.lockUserSession('${userId}', '${session._id}')">🔒 Lock</button>` :
+              `<button class="btn btn-unlock" onclick="app.unlockUserSession('${userId}', '${session._id}')">🔓 Unlock</button>`
             }
-            <button class="btn btn-sm btn-danger" onclick="audioPlayer.terminateUserSession('${userId}', '${session._id}')" title="Terminate Session">
-              ❌ End
-            </button>
+            <button class="btn btn-terminate" onclick="app.terminateUserSession('${userId}', '${session._id}')">❌ Terminate</button>
           </div>
         </td>
       `;
-      tableBody.appendChild(row);
+      sessionsTableBody.appendChild(row);
     });
   }
 
@@ -2324,7 +2316,7 @@ class SecureAudioPlayer {
 
   async updateSessionStatus(userId, sessionId, status) {
     try {
-      const response = await fetch(`/api/admin/users/${userId}/sessions/${sessionId}`, {
+      const response = await fetch(`/api/admin/sessions/${sessionId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -2335,10 +2327,10 @@ class SecureAudioPlayer {
 
       if (response.ok) {
         this.showSuccess(`Session ${status} successfully`);
-        await this.loadUserSessions(userId);
+        this.loadUserSessions(userId);
       } else {
-        const result = await response.json();
-        this.showError(result.error || `Failed to ${status} session`);
+        const error = await response.json();
+        this.showError(error.error || `Failed to ${status} session`);
       }
     } catch (error) {
       this.showError('Network error occurred');
@@ -2354,26 +2346,7 @@ class SecureAudioPlayer {
   }
 
   async bulkUpdateUserSessions(userId, status) {
-    try {
-      const response = await fetch(`/api/admin/users/${userId}/sessions/bulk`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-        },
-        body: JSON.stringify({ status })
-      });
-
-      if (response.ok) {
-        this.showSuccess(`All sessions ${status} successfully`);
-        await this.loadUserSessions(userId);
-      } else {
-        const result = await response.json();
-        this.showError(result.error || `Failed to ${status} sessions`);
-      }
-    } catch (error) {
-      this.showError('Network error occurred');
-    }
+    this.showError('Bulk session operations not yet implemented');
   }
 
   // Form validation functions
